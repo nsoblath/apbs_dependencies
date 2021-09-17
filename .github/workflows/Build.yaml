@@ -1,0 +1,71 @@
+name: Build and Package
+
+on:
+  push:
+    branches: [ main ]
+    tags: ['*']
+  pull_request:
+
+  workflow_dispatch:
+
+
+jobs:
+
+  Build:
+
+    runs-on: ${{ matrix.os }}
+    if: "!contains(github.event.head_commit.message, 'noci')"
+
+    strategy:
+      matrix:
+        fail-fast: [false]
+        os: [windows-latest]
+        include:
+          - os: windows-latest
+            CMAKE_SYSTEM: win64
+            PACKAGE_TYPE: zip
+
+    env:
+      # job-wide environment variables to use in `run` commands to avoid command-injection risks
+      CMAKE_SYSTEM: ${{ matrix.CMAKE_SYSTEM }}
+      CREATE_PACKAGE: ${{ startsWith(github.ref, 'refs/tags/') }}
+
+    steps:
+
+      - name: Add msbuild to PATH
+        if: startsWith(matrix.os, 'windows')  # Windows only
+        uses: microsoft/setup-msbuild@v1.0.2
+
+      - name: Cache vcpkg packages
+        uses: pat-s/always-upload-cache@v2  # performs caching even if the overall job fails
+#        uses: actions/cache@v2
+        if: startsWith(matrix.os, 'windows')  # Windows only
+        env:
+          cache-name: cache-vcpkg-suitesparse
+        with:
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-rev0
+          path: |
+              C:\vcpkg\scripts
+              C:\vcpkg\installed
+              C:\vcpkg\triplets
+              C:\vcpkg\versions
+
+      - name: Install Window dependencies
+        if: startsWith(matrix.os, 'windows')  # Windows only
+        run: |
+          vcpkg install suitesparse
+
+      - name: Zip vcpkg directories
+        if: startsWith(matrix.os, 'windows') # Windows only
+        run: |
+          7z a -tzip apbs_dependencies_vcpkg.zip /c/vcpkg/scripts /c/vcpkg/installed /c/vcpkg/triplets /c/vcpkg/versions
+        shell: bash
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')  # Tag/release only
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        with:
+          files: |
+            apbs_dependencies_vcpkg.zip
